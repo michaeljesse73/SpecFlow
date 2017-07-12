@@ -5,18 +5,22 @@ using System.IO;
 using System.Linq;
 using System.Xml;
 using System.Xml.Linq;
+using TechTalk.SpecFlow.Configuration;
 using TechTalk.SpecFlow.Generator.Configuration;
 using TechTalk.SpecFlow.Generator.Interfaces;
+using TechTalk.SpecFlow.Tracing;
 
 namespace TechTalk.SpecFlow.Generator.Project
 {
     public class MsBuildProjectReader : ISpecFlowProjectReader
     {
         private readonly IGeneratorConfigurationProvider _configurationLoader;
+        private readonly IMSBuildRelativePathParser _msBuildRelativePathParser;
 
-        public MsBuildProjectReader(IGeneratorConfigurationProvider configurationLoader)
+        public MsBuildProjectReader(IGeneratorConfigurationProvider configurationLoader, IMSBuildRelativePathParser msBuildRelativePathParser)
         {
             _configurationLoader = configurationLoader;
+            _msBuildRelativePathParser = msBuildRelativePathParser;
         }
 
         public SpecFlowProject ReadSpecFlowProject(string projectFilePath)
@@ -74,16 +78,37 @@ namespace TechTalk.SpecFlow.Generator.Project
         private SpecFlowProject LoadAppConfig(SpecFlowProject specFlowProject, XDocument xDocument, string projectFolder, bool newProjectSystem)
         {
             var appConfigFile = GetAppConfigFile(xDocument, newProjectSystem, projectFolder);
+
+            SpecFlowConfigurationHolder configurationHolder = null;
             if (!string.IsNullOrWhiteSpace(appConfigFile))
             {
                 var configFilePath = Path.Combine(projectFolder, appConfigFile);
                 var configFileContent = File.ReadAllText(configFilePath);
-                var configurationHolder = GetConfigurationHolderFromFileContent(configFileContent);
+                configurationHolder = GetConfigurationHolderFromFileContent(configFileContent);
+            }
+
+
+
+            var jsonConfigFile = GetJsonConfigFile(xDocument, newProjectSystem, projectFolder);
+            if (!string.IsNullOrWhiteSpace(jsonConfigFile))
+            {
+                var configFilePath = Path.Combine(projectFolder, jsonConfigFile);
+                var configFileContent = File.ReadAllText(configFilePath);
+                configurationHolder = new SpecFlowConfigurationHolder(ConfigSource.Json, configFileContent);
+            }
+
+            if (configurationHolder != null)
+            {
                 specFlowProject.ProjectSettings.ConfigurationHolder = configurationHolder;
                 specFlowProject.Configuration = _configurationLoader.LoadConfiguration(configurationHolder);
             }
 
             return specFlowProject;
+        }
+
+        private string GetJsonConfigFile(XDocument xDocument, bool newProjectSystem, string projectFolder)
+        {
+            return FindFile(xDocument, newProjectSystem, projectFolder, "specflow.json");
         }
 
         private SpecFlowProject LoadFeatureFiles(SpecFlowProject specFlowProject, XDocument xDocument, string projectFolder, bool newProjectSystem)
@@ -103,10 +128,15 @@ namespace TechTalk.SpecFlow.Generator.Project
 
         public static SpecFlowProject LoadSpecFlowProjectFromMsBuild(string projectFilePath)
         {
-            return new MsBuildProjectReader(new GeneratorConfigurationProvider()).ReadSpecFlowProject(projectFilePath);
+            return new MsBuildProjectReader(new GeneratorConfigurationProvider(new ConfigurationLoader()), new MSBuildRelativePathParser()).ReadSpecFlowProject(projectFilePath);
         }
 
         private string GetAppConfigFile(XDocument xDocument, bool newProjectSystem, string projectFolder)
+        {
+            return FindFile(xDocument, newProjectSystem, projectFolder, "app.config");
+        }
+
+        private string FindFile(XDocument xDocument, bool newProjectSystem, string projectFolder, string fileName)
         {
             var nodesWhereFeatureFilesCouldBe = GetNotCompileableNodes(xDocument, newProjectSystem);
 
@@ -118,7 +148,7 @@ namespace TechTalk.SpecFlow.Generator.Project
                     continue;
                 }
 
-                if (Path.GetFileName(include).Equals("app.config", StringComparison.InvariantCultureIgnoreCase))
+                if (Path.GetFileName(include).Equals(fileName, StringComparison.InvariantCultureIgnoreCase))
                 {
                     return include;
                 }
@@ -126,7 +156,7 @@ namespace TechTalk.SpecFlow.Generator.Project
 
             if (newProjectSystem)
             {
-                var appConfigFilePath = Path.Combine(projectFolder, "app.config");
+                var appConfigFilePath = Path.Combine(projectFolder, fileName);
 
                 if (File.Exists(appConfigFilePath))
                 {
@@ -157,15 +187,18 @@ namespace TechTalk.SpecFlow.Generator.Project
 
                 if (IsAFeatureFile(fileName))
                 {
-                    var featureFile = new FeatureFileInput(fileName);
-
                     var customNamespace = xElement.Descendants(GetNameWithNamespace("CustomToolNamespace", newProjectSystem)).SingleOrDefault();
-                    if (customNamespace != null)
+                  
+                    if (fileName.Contains("*"))
                     {
-                        featureFile.CustomNamespace = customNamespace.Value;
-                    }
+                        var files = _msBuildRelativePathParser.GetFiles(projectFolder, fileName);
 
-                    result.Add(featureFile);
+                        result.AddRange(files.Select(file => CreateFeatureFileInput(file, customNamespace)));
+                    }
+                    else
+                    {
+                        result.Add(CreateFeatureFileInput(fileName, customNamespace));
+                    }
                 }
             }
 
@@ -190,6 +223,17 @@ namespace TechTalk.SpecFlow.Generator.Project
             }
 
             return result;
+        }
+
+        private FeatureFileInput CreateFeatureFileInput(string file, XElement customNamespace)
+        {
+            var featureFile = new FeatureFileInput(file);
+
+            if (customNamespace != null)
+            {
+                featureFile.CustomNamespace = customNamespace.Value;
+            }
+            return featureFile;
         }
 
         private bool IsAFeatureFile(string fileName)

@@ -5,16 +5,16 @@ using FluentAssertions;
 using NUnit.Framework;
 using TechTalk.SpecFlow.Generator;
 using TechTalk.SpecFlow.Generator.Project;
+using TechTalk.SpecFlow.Tracing;
 
 namespace TechTalk.SpecFlow.GeneratorTests
 {
-    //If this tests are failing in R# TestRunner, disable shadow copy of assemblies
     [TestFixture]
     public class MsBuildProjectReaderTests
     {
         private void Should_parse_csproj_file_correctly(string csprojPath, string language, string assemblyName, string rootNamespace, string projectName)
         {
-            var directoryName = Path.GetDirectoryName(GetType().Assembly.Location);
+            var directoryName = Path.GetDirectoryName(new Uri(GetType().Assembly.CodeBase).LocalPath);
             var projectFilePath = Path.Combine(directoryName, csprojPath);
             var specflowProjectfile = MsBuildProjectReader.LoadSpecFlowProjectFromMsBuild(projectFilePath);
 
@@ -25,18 +25,20 @@ namespace TechTalk.SpecFlow.GeneratorTests
 
             specflowProjectfile.ProjectSettings.ProjectPlatformSettings.Language.Should().Be(language);
 
-            specflowProjectfile.FeatureFiles.Count.Should().Be(4);
+            specflowProjectfile.FeatureFiles.Count.Should().Be(6);
             specflowProjectfile.FeatureFiles.Single(x => x.ProjectRelativePath == @"Features\Login\SocialLogins.feature").Should().NotBeNull();
             specflowProjectfile.FeatureFiles.Single(x => x.ProjectRelativePath == @"Features\WorkflowDefinition\CreateWorkflowDefinition.feature").Should().NotBeNull();
             specflowProjectfile.FeatureFiles.Single(x => x.ProjectRelativePath == @"Features\WorkflowDefinition\CreateWorkflowDefinition.feature").CustomNamespace.Should().Be("CustomNameSpace");
             specflowProjectfile.FeatureFiles.Single(x => x.ProjectRelativePath == @"Features\WorkflowInstance\WorkflowInstance.feature").Should().NotBeNull();
             specflowProjectfile.FeatureFiles.Single(x => x.ProjectRelativePath == @"..\..\LinkedFeature.feature").Should().NotBeNull();
+            specflowProjectfile.FeatureFiles.Single(x => x.ProjectRelativePath == @"..\ExampleFeatures\Features\Subfolder1\ExternalFeature1.feature").Should().NotBeNull();
+            specflowProjectfile.FeatureFiles.Single(x => x.ProjectRelativePath == @"..\ExampleFeatures\Features\Subfolder2\ExternalFeature2.feature").Should().NotBeNull();
+            
 
-
-            specflowProjectfile.Configuration.GeneratorConfiguration.AllowDebugGeneratedFiles.Should().BeFalse();
-            specflowProjectfile.Configuration.GeneratorConfiguration.AllowRowTests.Should().BeTrue();
-            specflowProjectfile.Configuration.GeneratorConfiguration.GeneratorUnitTestProvider.Should().Be("MSTest");
-            specflowProjectfile.Configuration.GeneratorConfiguration.FeatureLanguage.Name.Should().Be("en-US");
+            specflowProjectfile.Configuration.SpecFlowConfiguration.AllowDebugGeneratedFiles.Should().BeFalse();
+            specflowProjectfile.Configuration.SpecFlowConfiguration.AllowRowTests.Should().BeTrue();
+            specflowProjectfile.Configuration.SpecFlowConfiguration.UnitTestProvider.Should().Be("MSTest");
+            specflowProjectfile.Configuration.SpecFlowConfiguration.FeatureLanguage.Name.Should().Be("en-US");
         }
 
         [Test]
